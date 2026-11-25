@@ -1,42 +1,51 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
+# Compiled object files
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# Precompiled headers
 *.gch
 *.pch
 
 # Linker files
 *.ilk
 
-# Debugger Files
+# Debugger files
 *.pdb
+*.opendb
+*.sdf
+*.cache
 
-# Compiled Dynamic libraries
+# Compiled libraries
 *.so
+*.so.*
 *.dylib
 *.dll
-*.so.*
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
 *.lib
+*.lai
+*.la
 
 # Executables
 *.exe
 *.out
 *.app
+
+# Visual Studio generated files
+.vs/
+[Bb]in/
+[Oo]bj/
+x64/
+x86/
+Debug/
+Release/
+
+# Visual Studio temporary files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
 
 # Build directories
 [Bb]uild/
@@ -57,12 +66,16 @@ compile_commands.json
 *.bak
 *.swp
 
-# vcpkg
+# vcpkg generated files
 vcpkg_installed/
 
-# debug information files
+# Fortran module files
+*.mod
+*.smod
+
+# Debug information
 *.dwo
 
-# test output & cache
+# Test output and cache
 Testing/
 .cache/
