@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <chrono>
+#include <iomanip>
 #include "ball.h"
 
 enum class SimulationMode
@@ -10,9 +12,9 @@ enum class SimulationMode
     CCD
 };
 
-const float DT_TOP = 1.0f / 60.0f; // шаг обновления верхней симуляции
-const float DT_NORMAL = 1.0f / 60.0f; // шаг обновления нижней медленной симуляции
-const float DT_FAST = 1.0f / 240.0f; // шаг обновления нижней быстрой симуляции     <- ЗДЕСЬ МЕНЯТЬ ГЕРЦОВКУ
+const float DT_TOP = 1.0f / 60.0f;
+const float DT_NORMAL = 1.0f / 60.0f;
+const float DT_FAST = 1.0f / 240.0f;
 
 const float WALL_X = 610.0f;
 const float WALL_Y = 90.0f;
@@ -21,6 +23,31 @@ const float WALL_HEIGHT = 120.0f;
 
 const float PROJECTILE_GRAVITY = 900.0f;
 const float PROJECTILE_RESTITUTION = 0.65f;
+
+// Временная структура для сбора статистики.
+// Все значения времени измеряются в миллисекундах реального времени CPU.
+struct Measurement
+{
+    double totalMs = 0.0;
+    unsigned long long calls = 0;
+
+    void add(double ms)
+    {
+        totalMs += ms;
+        ++calls;
+    }
+
+    double averageMs() const
+    {
+        return calls ? totalMs / static_cast<double>(calls) : 0.0;
+    }
+
+    void reset()
+    {
+        totalMs = 0.0;
+        calls = 0;
+    }
+};
 
 void resetProjectile(sf::CircleShape& projectile, sf::Vector2f& velocity, bool& collided, bool& tunneled)
 {
@@ -70,7 +97,6 @@ void updateDCD(sf::CircleShape& projectile, sf::RectangleShape& wall, sf::Vector
     }
 }
 
-
 void updateCCD(sf::CircleShape& projectile, sf::RectangleShape& wall, sf::Vector2f& velocity, float dt, bool& collided)
 {
     float remainingTime = dt;
@@ -89,7 +115,8 @@ void updateCCD(sf::CircleShape& projectile, sf::RectangleShape& wall, sf::Vector
 
             if (timeToImpact <= remainingTime)
             {
-                float impactY = position.y + velocity.y*timeToImpact + 0.5f*PROJECTILE_GRAVITY*timeToImpact*timeToImpact;
+                float impactY = position.y + velocity.y * timeToImpact
+                    + 0.5f * PROJECTILE_GRAVITY * timeToImpact * timeToImpact;
 
                 bool verticalOverlap = impactY + projectile.getRadius() > wallBounds.top &&
                     impactY - projectile.getRadius() < wallBounds.top + wallBounds.height;
@@ -115,12 +142,12 @@ void updateCCD(sf::CircleShape& projectile, sf::RectangleShape& wall, sf::Vector
     }
 
     position.x += velocity.x * remainingTime;
-    position.y += velocity.y * remainingTime + 0.5f * PROJECTILE_GRAVITY * remainingTime * remainingTime;
+    position.y += velocity.y * remainingTime
+        + 0.5f * PROJECTILE_GRAVITY * remainingTime * remainingTime;
     velocity.y += PROJECTILE_GRAVITY * remainingTime;
 
     projectile.setPosition(position);
 }
-
 
 int main()
 {
@@ -155,6 +182,22 @@ int main()
     double accumulatorFast = 0.0;
 
     sf::Clock clock;
+
+    // Отдельные измерения каждого типа физического обновления.
+    Measurement dcdMeasurement;
+    Measurement ccdMeasurement;
+    Measurement normalMeasurement;
+    Measurement fastMeasurement;
+    Measurement framePhysicsMeasurement;
+
+    // Счётчики количества вызовов физики за кадр.
+    unsigned long long totalTopSteps = 0;
+    unsigned long long totalSlowSteps = 0;
+    unsigned long long totalFastSteps = 0;
+    unsigned long long renderedFrames = 0;
+
+    // Статистика выводится раз в 2 секунды реального времени.
+    auto reportStart = std::chrono::steady_clock::now();
 
     while (window.isOpen())
     {
@@ -200,27 +243,63 @@ int main()
             }
         }
 
+        // Суммарное реальное время всех физических расчётов в текущем кадре.
+        double thisFramePhysicsMs = 0.0;
+
         while (accumulatorTop >= DT_TOP)
         {
+            auto start = std::chrono::steady_clock::now();
+
             if (mode == SimulationMode::DCD)
                 updateDCD(projectile, wall, velocity, DT_TOP, collided, tunneled);
             else
                 updateCCD(projectile, wall, velocity, DT_TOP, collided);
 
+            auto finish = std::chrono::steady_clock::now();
+            double elapsedMs = std::chrono::duration<double, std::milli>(finish - start).count();
+
+            if (mode == SimulationMode::DCD)
+                dcdMeasurement.add(elapsedMs);
+            else
+                ccdMeasurement.add(elapsedMs);
+
+            thisFramePhysicsMs += elapsedMs;
+            ++totalTopSteps;
             accumulatorTop -= DT_TOP;
         }
 
         while (accumulatorSlow >= DT_NORMAL)
         {
+            auto start = std::chrono::steady_clock::now();
+
             updatePile(normalBalls, normalCup, DT_NORMAL);
+
+            auto finish = std::chrono::steady_clock::now();
+            double elapsedMs = std::chrono::duration<double, std::milli>(finish - start).count();
+
+            normalMeasurement.add(elapsedMs);
+            thisFramePhysicsMs += elapsedMs;
+            ++totalSlowSteps;
             accumulatorSlow -= DT_NORMAL;
         }
 
         while (accumulatorFast >= DT_FAST)
         {
+            auto start = std::chrono::steady_clock::now();
+
             updatePile(fastBalls, fastCup, DT_FAST);
+
+            auto finish = std::chrono::steady_clock::now();
+            double elapsedMs = std::chrono::duration<double, std::milli>(finish - start).count();
+
+            fastMeasurement.add(elapsedMs);
+            thisFramePhysicsMs += elapsedMs;
+            ++totalFastSteps;
             accumulatorFast -= DT_FAST;
         }
+
+        framePhysicsMeasurement.add(thisFramePhysicsMs);
+        ++renderedFrames;
 
         window.clear(sf::Color(30, 30, 30));
 
@@ -239,6 +318,59 @@ int main()
         drawBalls(window, fastBalls);
 
         window.display();
+
+        // Печать статистики раз в 2 секунды.
+        auto now = std::chrono::steady_clock::now();
+        double reportSeconds = std::chrono::duration<double>(now - reportStart).count();
+
+        if (reportSeconds >= 2.0)
+        {
+            std::cout << "\n========== PHYSICS PERFORMANCE ==========\n";
+            std::cout << std::fixed << std::setprecision(6);
+
+            std::cout << "DCD: average update = " << dcdMeasurement.averageMs()
+                << " ms; calls = " << dcdMeasurement.calls << "\n";
+
+            std::cout << "CCD: average update = " << ccdMeasurement.averageMs()
+                << " ms; calls = " << ccdMeasurement.calls << "\n";
+
+            std::cout << "Normal balls (20, 60 Hz): average update = "
+                << normalMeasurement.averageMs()
+                << " ms; calls = " << normalMeasurement.calls << "\n";
+
+            std::cout << "Fast balls (5, 240 Hz): average update = "
+                << fastMeasurement.averageMs()
+                << " ms; calls = " << fastMeasurement.calls << "\n";
+
+            std::cout << "Average total physics time per rendered frame = "
+                << framePhysicsMeasurement.averageMs() << " ms\n";
+
+            if (renderedFrames > 0)
+            {
+                std::cout << "Average physics steps per rendered frame: "
+                    << "projectile = "
+                    << static_cast<double>(totalTopSteps) / renderedFrames
+                    << ", normal = "
+                    << static_cast<double>(totalSlowSteps) / renderedFrames
+                    << ", fast = "
+                    << static_cast<double>(totalFastSteps) / renderedFrames
+                    << "\n";
+            }
+
+            std::cout << "=========================================\n\n";
+
+            dcdMeasurement.reset();
+            ccdMeasurement.reset();
+            normalMeasurement.reset();
+            fastMeasurement.reset();
+            framePhysicsMeasurement.reset();
+
+            totalTopSteps = 0;
+            totalSlowSteps = 0;
+            totalFastSteps = 0;
+            renderedFrames = 0;
+            reportStart = now;
+        }
     }
 
     return 0;
